@@ -1,5 +1,5 @@
-import type { RefObject } from "react"
-import { Mic, Square, AudioWaveform, Play } from "lucide-react"
+import { useRef, type RefObject } from "react"
+import { Mic, Square, AudioWaveform, Play, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { LiveVisualizer } from "@/components/LiveVisualizer"
@@ -22,6 +22,7 @@ type RecorderPanelProps = {
   onStop: () => void
   onPlay: () => void
   onAnalyze: () => void
+  onUpload: (file: File) => void
 }
 
 function formatTime(seconds: number): string {
@@ -48,8 +49,10 @@ export function RecorderPanel({
   onStop,
   onPlay,
   onAnalyze,
+  onUpload,
 }: RecorderPanelProps) {
   const { t } = usePreferences()
+  const fileRef = useRef<HTMLInputElement>(null)
   const status = {
     idle: t("statusReady"),
     countdown: t("statusGetReady"),
@@ -102,10 +105,10 @@ export function RecorderPanel({
             </div>
           ) : null}
         </div>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-nowrap items-center gap-2">
           <Button
             size="lg"
-            className="h-11 min-w-36 px-5"
+            className="h-11 min-w-0 flex-1 px-3"
             onClick={onStart}
             disabled={recording || counting || analyzing}
           >
@@ -115,7 +118,7 @@ export function RecorderPanel({
           <Button
             size="lg"
             variant="outline"
-            className="h-11 min-w-36 px-5"
+            className="h-11 min-w-0 flex-1 px-3"
             onClick={onStop}
             disabled={!recording && !counting}
           >
@@ -125,7 +128,7 @@ export function RecorderPanel({
           <Button
             size="lg"
             variant="outline"
-            className="h-11 min-w-36 px-5"
+            className="h-11 min-w-0 flex-1 px-3"
             onClick={onPlay}
             disabled={!canPlay}
             aria-pressed={playing}
@@ -136,13 +139,37 @@ export function RecorderPanel({
           <Button
             size="lg"
             variant="secondary"
-            className="h-11 min-w-36 px-5"
+            className="h-11 min-w-0 flex-1 px-3"
             onClick={onAnalyze}
             disabled={!canAnalyze}
           >
             <AudioWaveform />
             {analyzing ? t("analyzing") : t("analyze")}
           </Button>
+          <Button
+            size="lg"
+            variant="outline"
+            className="size-11 shrink-0 px-0"
+            aria-label={t("upload")}
+            title={t("upload")}
+            disabled={recording || counting || analyzing}
+            onClick={() => fileRef.current?.click()}
+          >
+            <Upload />
+          </Button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.webm"
+            className="sr-only"
+            aria-hidden="true"
+            tabIndex={-1}
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              event.target.value = ""
+              if (file) onUpload(file)
+            }}
+          />
         </div>
         {error ? (
           <p role="alert" className="text-sm text-destructive">

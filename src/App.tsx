@@ -4,6 +4,7 @@ import { RecorderPanel } from "@/components/RecorderPanel"
 import { ScoreReport } from "@/components/ScoreReport"
 import { SettingsDialog } from "@/components/SettingsDialog"
 import { Button } from "@/components/ui/button"
+import { decodeAudioFile } from "@/lib/audio/decode"
 import { playTake, type PlaybackHandle } from "@/lib/audio/playback"
 import { isMicDenied, startRecorder, type RecorderHandle } from "@/lib/audio/recorder"
 import { loadTake, saveTake } from "@/lib/audio/takeStore"
@@ -253,6 +254,23 @@ export default function App() {
     })
   }
 
+  const onUpload = async (file: File) => {
+    stopPlayback()
+    setErrorKey(null)
+    setResult(null)
+    requestRef.current += 1
+    try {
+      const nextTake = await decodeAudioFile(file)
+      setTake(nextTake)
+      setElapsed(nextTake.samples.length / nextTake.sampleRate)
+      setAnalyser(null)
+      setPhase("ready")
+      void Promise.resolve().then(() => saveTake(nextTake))
+    } catch {
+      setErrorKey("uploadFailed")
+    }
+  }
+
   const onAnalyze = () => beginAnalysis(false)
   const analyzeRef = useRef(beginAnalysis)
   analyzeRef.current = beginAnalysis
@@ -306,6 +324,9 @@ export default function App() {
           onStop={onStop}
           onPlay={onPlay}
           onAnalyze={onAnalyze}
+          onUpload={(file) => {
+            void onUpload(file)
+          }}
         />
         {result ? <ScoreReport result={result} /> : null}
         <SettingsDialog

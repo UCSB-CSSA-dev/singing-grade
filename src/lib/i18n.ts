@@ -20,6 +20,8 @@ const STRINGS = {
     play: "Play",
     stopPlay: "Stop play",
     analyze: "Analyze",
+    upload: "Upload",
+    uploadFailed: "Could not read that audio file. Use an MP3, WAV, or another recording your browser can play.",
     analyzing: "Analyzing…",
     micDenied:
       "Microphone access was denied. Allow the mic in your browser settings, then try again.",
@@ -156,6 +158,8 @@ const STRINGS = {
     play: "播放",
     stopPlay: "停止播放",
     analyze: "分析",
+    upload: "上传",
+    uploadFailed: "无法读取这个音频文件。请使用 MP3、WAV，或浏览器能播放的其他录音。",
     analyzing: "分析中…",
     micDenied: "麦克风权限被拒绝。请在浏览器设置中允许麦克风，然后重试。",
     micFailed: "无法打开麦克风。",
