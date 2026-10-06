@@ -9,17 +9,20 @@ export const MIC_GAIN_DEFAULT = 4
 type Settings = {
   locale: Locale
   micGain: number
+  liveMode: boolean
 }
 
 type Preferences = Settings & {
   setLocale: (locale: Locale) => void
   setMicGain: (micGain: number) => void
+  setLiveMode: (liveMode: boolean) => void
   t: (key: MessageKey, vars?: Record<string, string | number>) => string
 }
 
 const DEFAULTS: Settings = {
   locale: "en",
   micGain: MIC_GAIN_DEFAULT,
+  liveMode: false,
 }
 
 const PreferencesContext = createContext<Preferences | null>(null)
@@ -35,10 +38,10 @@ function loadSettings(): Settings {
     if (!raw) return DEFAULTS
     const parsed: unknown = JSON.parse(raw)
     if (typeof parsed !== "object" || parsed == null) return DEFAULTS
-    const record = parsed as { locale?: unknown; micGain?: unknown }
+    const record = parsed as { locale?: unknown; micGain?: unknown; liveMode?: unknown }
     const locale = record.locale === "zh" ? "zh" : "en"
     const micGain = typeof record.micGain === "number" ? clampGain(record.micGain) : MIC_GAIN_DEFAULT
-    return { locale, micGain }
+    return { locale, micGain, liveMode: record.liveMode === true }
   } catch {
     return DEFAULTS
   }
@@ -67,6 +70,13 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
     setMicGain: (micGain) => {
       setSettings((current) => {
         const next = { ...current, micGain: clampGain(micGain) }
+        saveSettings(next)
+        return next
+      })
+    },
+    setLiveMode: (liveMode) => {
+      setSettings((current) => {
+        const next = { ...current, liveMode }
         saveSettings(next)
         return next
       })

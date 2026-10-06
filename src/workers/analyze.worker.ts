@@ -1,12 +1,13 @@
 import { analyzeSinging } from "@/lib/audio/analyze"
 import type { Locale } from "@/lib/i18n"
-import type { AnalysisResult } from "@/lib/audio/types"
+import type { AnalysisResult, ReferenceAudio } from "@/lib/audio/types"
 
 type Request = {
   id: number
   samples: Float32Array
   sampleRate: number
   locale: Locale
+  reference?: ReferenceAudio
 }
 
 type Response = {
@@ -20,9 +21,9 @@ const scope = self as unknown as {
 }
 
 scope.onmessage = (event) => {
-  const { id, samples, sampleRate, locale } = event.data
+  const { id, samples, sampleRate, locale, reference } = event.data
   scope.postMessage({
     id,
-    result: analyzeSinging(samples, sampleRate, locale),
+    result: analyzeSinging(samples, sampleRate, locale, reference),
   })
 }

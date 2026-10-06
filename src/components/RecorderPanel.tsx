@@ -1,7 +1,6 @@
 import { useRef, type RefObject } from "react"
 import { Mic, Square, AudioWaveform, Play, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { LiveVisualizer } from "@/components/LiveVisualizer"
 import { usePreferences } from "@/lib/preferences"
 
@@ -23,6 +22,7 @@ type RecorderPanelProps = {
   onPlay: () => void
   onAnalyze: () => void
   onUpload: (file: File) => void
+  score: number | null
 }
 
 function formatTime(seconds: number): string {
@@ -50,6 +50,7 @@ export function RecorderPanel({
   onPlay,
   onAnalyze,
   onUpload,
+  score,
 }: RecorderPanelProps) {
   const { t } = usePreferences()
   const fileRef = useRef<HTMLInputElement>(null)
@@ -68,24 +69,16 @@ export function RecorderPanel({
   const shortTake = takeSeconds != null && takeSeconds < 3 && !recording && !counting
 
   return (
-    <Card className="border-white/10 bg-card/80 shadow-[0_0_0_1px_rgba(103,232,249,0.08),0_24px_80px_rgba(0,0,0,0.35)] backdrop-blur-sm">
-      <CardHeader>
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <CardTitle className="text-lg">{t("capture")}</CardTitle>
-            <CardDescription>{t("captureHint")}</CardDescription>
-          </div>
-          <div className="text-right">
-            <p className="font-mono text-[10px] tracking-[0.16em] whitespace-nowrap text-cyan-200/80 uppercase">
-              {playing && !recording ? t("statusPlaying") : status}
-            </p>
-            <p className="font-mono text-2xl text-foreground tabular-nums">
-              {counting && countdown != null ? countdown : formatTime(shownTime)}
-            </p>
-          </div>
+    <footer className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-background/85 backdrop-blur-md">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-5 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="font-mono text-[10px] tracking-[0.16em] text-cyan-200/80 uppercase">
+            {playing && !recording ? t("statusPlaying") : status}
+          </p>
+          <p className="font-mono text-lg text-foreground tabular-nums">
+            {counting && countdown != null ? countdown : formatTime(shownTime)}
+          </p>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-5">
         <div className="relative">
           <LiveVisualizer
             analyser={analyser}
@@ -93,11 +86,12 @@ export function RecorderPanel({
             playing={playing}
             playheadRef={playheadRef}
             samples={samples}
+            compact
           />
           {counting && countdown != null ? (
-            <div className="pointer-events-none absolute inset-x-0 top-0 grid h-40 place-items-center">
+            <div className="pointer-events-none absolute inset-x-0 top-0 grid h-12 place-items-center">
               <p
-                className="font-mono text-7xl leading-none text-cyan-200 tabular-nums drop-shadow-[0_0_24px_rgba(103,232,249,0.45)]"
+                className="font-mono text-3xl leading-none text-cyan-200 tabular-nums"
                 aria-live="assertive"
               >
                 {countdown}
@@ -105,51 +99,70 @@ export function RecorderPanel({
             </div>
           ) : null}
         </div>
+        {error ? (
+          <p role="alert" className="text-xs text-destructive">
+            {error}
+          </p>
+        ) : null}
+        {shortTake ? <p className="text-xs text-muted-foreground">{t("shortTake")}</p> : null}
+        {analyzing ? (
+          <p className="font-mono text-[10px] tracking-wide text-cyan-200/80">{t("analyzingHint")}</p>
+        ) : null}
         <div className="flex flex-nowrap items-center gap-2">
           <Button
             size="lg"
-            className="h-11 min-w-0 flex-1 px-3"
+            className="h-10 min-w-0 flex-1 px-3"
+            aria-label={t("startRecording")}
             onClick={onStart}
             disabled={recording || counting || analyzing}
           >
             <Mic />
-            {t("startRecording")}
+            <span className="hidden sm:inline">{t("startRecording")}</span>
           </Button>
           <Button
             size="lg"
             variant="outline"
-            className="h-11 min-w-0 flex-1 px-3"
+            className="h-10 min-w-0 flex-1 px-3"
+            aria-label={t("stopRecording")}
             onClick={onStop}
             disabled={!recording && !counting}
           >
             <Square />
-            {t("stopRecording")}
+            <span className="hidden sm:inline">{t("stopRecording")}</span>
           </Button>
           <Button
             size="lg"
             variant="outline"
-            className="h-11 min-w-0 flex-1 px-3"
+            className="h-10 min-w-0 flex-1 px-3"
+            aria-label={playing ? t("stopPlay") : t("play")}
             onClick={onPlay}
             disabled={!canPlay}
             aria-pressed={playing}
           >
             {playing ? <Square /> : <Play />}
-            {playing ? t("stopPlay") : t("play")}
+            <span className="hidden sm:inline">{playing ? t("stopPlay") : t("play")}</span>
           </Button>
           <Button
             size="lg"
             variant="secondary"
-            className="h-11 min-w-0 flex-1 px-3"
+            className="h-10 min-w-0 flex-1 px-3"
             onClick={onAnalyze}
-            disabled={!canAnalyze}
+            disabled={score == null && !canAnalyze}
+            aria-label={score != null ? t("overallScore", { score }) : analyzing ? t("analyzing") : t("analyze")}
           >
-            <AudioWaveform />
-            {analyzing ? t("analyzing") : t("analyze")}
+            {score != null ? (
+              <span className="font-mono text-base tabular-nums">{score}</span>
+            ) : (
+              <>
+                <AudioWaveform />
+                <span className="hidden sm:inline">{analyzing ? t("analyzing") : t("analyze")}</span>
+              </>
+            )}
           </Button>
           <Button
             size="lg"
             variant="outline"
-            className="size-11 shrink-0 px-0"
+            className="size-10 shrink-0 px-0"
             aria-label={t("upload")}
             title={t("upload")}
             disabled={recording || counting || analyzing}
@@ -171,20 +184,7 @@ export function RecorderPanel({
             }}
           />
         </div>
-        {error ? (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
-        {shortTake ? (
-          <p className="text-sm text-muted-foreground">{t("shortTake")}</p>
-        ) : null}
-        {analyzing ? (
-          <p className="font-mono text-xs tracking-wide text-cyan-200/80">
-            {t("analyzingHint")}
-          </p>
-        ) : null}
-      </CardContent>
-    </Card>
+      </div>
+    </footer>
   )
 }

@@ -4,51 +4,50 @@ import { NoteLevelChart } from "@/components/NoteLevelChart"
 import { PitchScrollChart } from "@/components/PitchScrollChart"
 import { ScoreDetail } from "@/components/ScoreDetail"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import type { AnalysisResult, DimensionId, DimensionScore, PitchFrame } from "@/lib/audio/types"
 import { usePreferences } from "@/lib/preferences"
 
 type ScoreReportProps = {
   result: AnalysisResult
+  open: boolean
+  onClose: () => void
 }
 
 type OpenChart = DimensionId | "pitch" | null
 
-export function ScoreReport({ result }: ScoreReportProps) {
+const popupClosers: Array<() => void> = []
+
+export function ScoreReport({ result, open, onClose }: ScoreReportProps) {
   const { t } = usePreferences()
-  const [open, setOpen] = useState<OpenChart>(null)
+  const [chart, setChart] = useState<OpenChart>(null)
 
   useEffect(() => {
-    setOpen(null)
+    setChart(null)
   }, [result])
+
+  if (!open) return null
 
   if (result.status === "insufficient") {
     return (
-      <Card className="border-white/10 bg-card/80">
-        <CardHeader>
-          <CardTitle>{t("notEnoughTitle")}</CardTitle>
-          <CardDescription>{result.message}</CardDescription>
-        </CardHeader>
-      </Card>
+      <ChartPopup title={t("notEnoughTitle")} onClose={onClose}>
+        <p className="text-sm text-muted-foreground">{result.message}</p>
+      </ChartPopup>
     )
   }
 
   const selected =
-    open != null && open !== "pitch"
-      ? (result.dimensions.find((dimension) => dimension.id === open) ?? null)
+    chart != null && chart !== "pitch"
+      ? (result.dimensions.find((dimension) => dimension.id === chart) ?? null)
       : null
 
   return (
-    <Card className="border-white/10 bg-card/80">
-      <CardHeader>
-        <CardTitle>{t("reportTitle")}</CardTitle>
-        <CardDescription>
-          {result.keyLabel} · {result.duration.toFixed(1)}s {t("recorded")} ·{" "}
-          {result.voicedSeconds.toFixed(1)}s {t("pitched")}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-8">
+    <ChartPopup title={t("reportTitle")} onClose={onClose}>
+      <p className="-mt-2 text-sm text-muted-foreground">
+        {result.keyLabel} · {result.duration.toFixed(1)}s {t("recorded")} · {result.voicedSeconds.toFixed(1)}s{" "}
+        {t("pitched")}
+      </p>
+      <div className="mt-6 space-y-8">
         <div className="flex flex-col gap-8 md:flex-row md:items-center">
           <ScoreRing score={result.overall} />
           <div className="flex-1 space-y-2">
@@ -58,13 +57,13 @@ export function ScoreReport({ result }: ScoreReportProps) {
               variant="outline"
               className="mb-1 w-full"
               aria-haspopup="dialog"
-              aria-expanded={open === "pitch"}
-              onClick={() => setOpen(open === "pitch" ? null : "pitch")}
+              aria-expanded={chart === "pitch"}
+              onClick={() => setChart(chart === "pitch" ? null : "pitch")}
             >
               {t("openPitchCharts")}
             </Button>
             {result.dimensions.map((dimension) => {
-              const expanded = open === dimension.id
+              const expanded = chart === dimension.id
               return (
                 <button
                   key={dimension.id}
@@ -72,7 +71,7 @@ export function ScoreReport({ result }: ScoreReportProps) {
                   className={`w-full rounded-lg px-2 py-2 text-left transition-colors hover:bg-white/5 ${expanded ? "bg-white/5 ring-1 ring-cyan-300/30" : ""}`}
                   aria-haspopup="dialog"
                   aria-expanded={expanded}
-                  onClick={() => setOpen(expanded ? null : dimension.id)}
+                  onClick={() => setChart(expanded ? null : dimension.id)}
                 >
                   <div className="flex items-baseline justify-between gap-3">
                     <span className="text-sm">{dimension.label}</span>
@@ -102,9 +101,9 @@ export function ScoreReport({ result }: ScoreReportProps) {
             ))}
           </ul>
         </div>
-      </CardContent>
-      {open === "pitch" ? (
-        <ChartPopup title={t("openPitchCharts")} onClose={() => setOpen(null)}>
+      </div>
+      {chart === "pitch" ? (
+        <ChartPopup title={t("openPitchCharts")} onClose={() => setChart(null)} layer="front">
           <div className="space-y-5">
             <div className="space-y-2">
               <h3 className="text-sm font-medium">{t("pitchContour")}</h3>
@@ -131,10 +130,10 @@ export function ScoreReport({ result }: ScoreReportProps) {
         <CriterionDialog
           dimension={selected}
           result={result}
-          onClose={() => setOpen(null)}
+          onClose={() => setChart(null)}
         />
       ) : null}
-    </Card>
+    </ChartPopup>
   )
 }
 
@@ -142,11 +141,13 @@ function ChartPopup({
   title,
   score,
   onClose,
+  layer = "base",
   children,
 }: {
   title: string
   score?: number
   onClose: () => void
+  layer?: "base" | "front"
   children: ReactNode
 }) {
   const { t } = usePreferences()
@@ -154,15 +155,23 @@ function ChartPopup({
 
   useEffect(() => {
     panelRef.current?.focus()
+    popupClosers.push(onClose)
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose()
+      if (event.key !== "Escape" || popupClosers[popupClosers.length - 1] !== onClose) return
+      onClose()
     }
     window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
+    return () => {
+      const index = popupClosers.lastIndexOf(onClose)
+      if (index >= 0) popupClosers.splice(index, 1)
+      window.removeEventListener("keydown", onKey)
+    }
   }, [onClose])
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center px-4 py-6">
+    <div
+      className={`fixed inset-0 grid place-items-center px-4 py-6 ${layer === "front" ? "z-[60]" : "z-50"}`}
+    >
       <button
         type="button"
         className="absolute inset-0 bg-black/60"
@@ -206,7 +215,7 @@ function CriterionDialog({
   onClose: () => void
 }) {
   return (
-    <ChartPopup title={dimension.label} score={dimension.score} onClose={onClose}>
+    <ChartPopup title={dimension.label} score={dimension.score} onClose={onClose} layer="front">
       <ScoreDetail
         dimension={dimension}
         series={result.series}
