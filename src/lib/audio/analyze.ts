@@ -5,6 +5,7 @@ import type {
   DimensionScore,
   NoteLevel,
   PitchFrame,
+  ReferenceAudio,
   ScoreSeries,
 } from "@/lib/audio/types"
 
@@ -304,19 +305,78 @@ function nearestDegreeMidi(midi: number, key: KeyEstimate): number {
   return best
 }
 
-function compareNotes(notes: HeldNote[], key: KeyEstimate): NoteLevel[] {
+function compareNotes(notes: HeldNote[], guide: PitchGuide): NoteLevel[] {
   return notes.map((note) => {
-    const sungMidi = median(note.hzs.map(hzToMidi))
-    const target = nearestDegreeMidi(sungMidi, key)
+    const sungHz = median(note.hzs)
+    const span = Math.max(note.end - note.start, 0.001)
+    const errors = note.hzs.map((hz, index) => guide.at(note.start + (index / note.hzs.length) * span, hz))
+    const targetHz = median(errors.map((error) => error.targetHz))
     return {
       start: note.start,
       end: note.end,
-      name: noteName(target),
-      cents: (sungMidi - target) * 100,
-      sungHz: midiToHz(sungMidi),
-      targetHz: midiToHz(target),
+      name: noteName(hzToMidi(targetHz)),
+      cents: median(errors.map((error) => error.cents)),
+      sungHz,
+      targetHz,
     }
   })
+}
+
+type PitchError = { cents: number; targetHz: number }
+
+type PitchGuide = {
+  key: KeyEstimate
+  fromAccompaniment: boolean
+  at: (time: number, hz: number) => PitchError
+}
+
+function scaleError(hz: number, key: KeyEstimate): PitchError {
+  const midi = hzToMidi(hz)
+  const target = nearestDegreeMidi(midi, key)
+  return { cents: (midi - target) * 100, targetHz: midiToHz(target) }
+}
+
+function againstReference(sungHz: number, referenceHz: number): PitchError {
+  const octaves = Math.round(Math.log2(sungHz / referenceHz))
+  const targetHz = referenceHz * 2 ** octaves
+  return { cents: 1200 * Math.log2(sungHz / targetHz), targetHz }
+}
+
+function referenceHzAt(frames: FrameFeature[], time: number): number | null {
+  if (frames.length === 0 || time < 0) return null
+  const hopSeconds = HOP / ANALYSIS_RATE
+  const index = Math.round(time / hopSeconds)
+  let bestHz: number | null = null
+  let bestDistance = Infinity
+  for (let cursor = index - 2; cursor <= index + 2; cursor++) {
+    const frame = frames[cursor]
+    if (!frame || frame.hz == null) continue
+    const distance = Math.abs(frame.time - time)
+    if (distance < bestDistance) {
+      bestDistance = distance
+      bestHz = frame.hz
+    }
+  }
+  return bestDistance <= 0.08 ? bestHz : null
+}
+
+function pitchGuide(frames: FrameFeature[], key: KeyEstimate, offsetSeconds: number): PitchGuide {
+  return {
+    key,
+    fromAccompaniment: true,
+    at: (time, hz) => {
+      const referenceHz = referenceHzAt(frames, time + offsetSeconds)
+      return referenceHz == null ? scaleError(hz, key) : againstReference(hz, referenceHz)
+    },
+  }
+}
+
+function singerGuide(key: KeyEstimate): PitchGuide {
+  return {
+    key,
+    fromAccompaniment: false,
+    at: (_time, hz) => ({ cents: centsToScale(hz, key), targetHz: scaleError(hz, key).targetHz }),
+  }
 }
 
 function centsToScale(hz: number, key: KeyEstimate): number {
@@ -422,12 +482,12 @@ function phrasesOf(frames: FrameFeature[], frameSeconds: number): Phrase[] {
 
 function scoreIntonation(
   frames: FrameFeature[],
-  key: KeyEstimate,
+  guide: PitchGuide,
   locale: Locale,
 ): DimensionScore {
   const errors: number[] = []
   for (const frame of frames) {
-    if (frame.hz != null) errors.push(Math.abs(centsToScale(frame.hz, key)))
+    if (frame.hz != null) errors.push(Math.abs(guide.at(frame.time, frame.hz).cents))
   }
   const inTune =
     errors.length === 0
@@ -439,11 +499,15 @@ function scoreIntonation(
     id: "intonation",
     label: translate(locale, "labelIntonation"),
     score,
-    detail: translate(locale, "intonationDetail", {
-      pct: Math.round(inTune * 100),
-      key: key.label,
-      cents: medianError.toFixed(0),
-    }),
+    detail: translate(
+      locale,
+      guide.fromAccompaniment ? "intonationReferenceDetail" : "intonationDetail",
+      {
+        pct: Math.round(inTune * 100),
+        key: guide.key.label,
+        cents: medianError.toFixed(0),
+      },
+    ),
   }
 }
 
@@ -684,6 +748,7 @@ export function analyzeSinging(
   samples: Float32Array,
   sampleRate: number,
   locale: Locale = "en",
+  reference?: ReferenceAudio,
 ): AnalysisResult {
   const duration = samples.length / sampleRate
   if (samples.length < FRAME || duration < 0.5) {
@@ -715,11 +780,13 @@ export function analyzeSinging(
     }
   }
 
-  const key = estimateKey(frames, locale)
+  const accompaniment = referenceGuide(reference, locale)
+  const key = accompaniment?.key ?? estimateKey(frames, locale)
+  const guide = accompaniment ?? singerGuide(key)
   const clipped = clipRatio(audio)
   const notes = heldNotes(frames, frameSeconds)
   const phrases = phrasesOf(frames, frameSeconds)
-  const intonation = scoreIntonation(frames, key, locale)
+  const intonation = scoreIntonation(frames, guide, locale)
   const stability = scoreStability(notes, frameSeconds, locale)
   const tone = scoreTone(frames, clipped, locale)
   const dynamics = scoreDynamics(frames, clipped, locale)
@@ -730,7 +797,7 @@ export function analyzeSinging(
     ...dimension,
     score: liftScore(dimension.score),
   }))
-  const series = buildSeries(frames, key, notes, phrases)
+  const series = buildSeries(frames, guide, notes, phrases)
   const overall = roundScore(
     dimensions.reduce((total, dimension) => total + dimension.score * WEIGHTS[dimension.id], 0),
   )
@@ -742,15 +809,26 @@ export function analyzeSinging(
     contour,
     duration,
     notes: coachNotes(rawDimensions, clipped, dynamics.range, median(phraseLengths), locale),
-    keyLabel: key.label,
+    keyLabel: guide.fromAccompaniment
+      ? translate(locale, "keyFromAccompaniment", { key: key.label })
+      : key.label,
     voicedSeconds,
     series,
   }
 }
 
+function referenceGuide(reference: ReferenceAudio | undefined, locale: Locale): PitchGuide | null {
+  if (!reference || reference.samples.length === 0) return null
+  const audio = resample(reference.samples, reference.sampleRate, ANALYSIS_RATE)
+  const frames = extractFrames(audio, ANALYSIS_RATE)
+  const voicedSeconds = frames.filter((frame) => frame.hz != null).length * (HOP / ANALYSIS_RATE)
+  if (voicedSeconds < MIN_VOICED_SECONDS) return null
+  return pitchGuide(frames, estimateKey(frames, locale), reference.offsetSeconds)
+}
+
 function buildSeries(
   frames: FrameFeature[],
-  key: KeyEstimate,
+  guide: PitchGuide,
   notes: HeldNote[],
   phrases: Phrase[],
 ): ScoreSeries {
@@ -759,7 +837,7 @@ function buildSeries(
   const dynamics = []
   for (const frame of frames) {
     if (frame.hz == null) continue
-    intonation.push({ time: frame.time, cents: centsToScale(frame.hz, key) })
+    intonation.push({ time: frame.time, cents: guide.at(frame.time, frame.hz).cents })
     if (frame.hnrDb != null) tone.push({ time: frame.time, hnrDb: frame.hnrDb })
     dynamics.push({ time: frame.time, db: frame.rmsDb })
   }
@@ -773,6 +851,6 @@ function buildSeries(
     tone,
     dynamics,
     phrases: phrases.map((phrase) => ({ start: phrase.start, end: phrase.end })),
-    notes: compareNotes(notes, key),
+    notes: compareNotes(notes, guide),
   }
 }

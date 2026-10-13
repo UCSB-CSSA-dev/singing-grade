@@ -41,6 +41,7 @@ jobs:
         run: npm run build
         env:
           BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          VITE_LSIT_API_KEY: ${{ secrets.LSIT_API_KEY }}
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

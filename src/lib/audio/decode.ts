@@ -14,7 +14,7 @@ export function mixToMono(channels: Float32Array[]): Float32Array {
   return mono
 }
 
-export async function decodeAudioFile(file: File): Promise<Take> {
+export async function decodeAudioFile(file: File, trimSilence = true): Promise<Take> {
   const bytes = await file.arrayBuffer()
   if (bytes.byteLength === 0) throw new Error("Empty audio file")
   const context = new AudioContext()
@@ -24,8 +24,9 @@ export async function decodeAudioFile(file: File): Promise<Take> {
       buffer.getChannelData(index),
     )
     const mixed = mixToMono(channels)
+    const timed = trimSilence ? trimLeadingSilence(mixed) : mixed
     return {
-      samples: normalizeSamples(trimLeadingSilence(mixed)),
+      samples: normalizeSamples(timed),
       sampleRate: buffer.sampleRate,
     }
   } finally {

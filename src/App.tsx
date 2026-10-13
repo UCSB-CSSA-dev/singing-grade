@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
-import { Settings } from "lucide-react"
+import { Music2, Settings } from "lucide-react"
+import { AccompanimentPanel, type AccompanimentPlayer } from "@/components/AccompanimentPanel"
 import { RecorderPanel } from "@/components/RecorderPanel"
 import { ScoreReport } from "@/components/ScoreReport"
 import { SettingsDialog } from "@/components/SettingsDialog"
@@ -8,7 +9,7 @@ import { decodeAudioFile } from "@/lib/audio/decode"
 import { playTake, type PlaybackHandle } from "@/lib/audio/playback"
 import { isMicDenied, startRecorder, type RecorderHandle } from "@/lib/audio/recorder"
 import { loadTake, saveTake } from "@/lib/audio/takeStore"
-import type { AnalysisResult, Take } from "@/lib/audio/types"
+import type { AnalysisResult, ReferenceAudio, Take } from "@/lib/audio/types"
 import type { MessageKey } from "@/lib/i18n"
 import { usePreferences } from "@/lib/preferences"
 
@@ -26,8 +27,10 @@ function createWorker(): Worker {
 }
 
 export default function App() {
-  const { locale, micGain, t } = usePreferences()
+  const { locale, micGain, liveMode, t } = usePreferences()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [accompanimentOpen, setAccompanimentOpen] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
   const [phase, setPhase] = useState<Phase>(() => (loadTake() ? "ready" : "idle"))
   const [countdown, setCountdown] = useState<number | null>(null)
   const [elapsed, setElapsed] = useState(0)
@@ -35,6 +38,9 @@ export default function App() {
   const [playing, setPlaying] = useState(false)
   const [errorKey, setErrorKey] = useState<MessageKey | null>(null)
   const [take, setTake] = useState<Take | null>(() => loadTake())
+  const [referenceTake, setReferenceTake] = useState<Take | null>(null)
+  const [referenceName, setReferenceName] = useState<string | null>(null)
+  const [referenceOffset, setReferenceOffset] = useState(0)
   const [result, setResult] = useState<AnalysisResult | null>(null)
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null)
   const recorderRef = useRef<RecorderHandle | null>(null)
@@ -46,6 +52,13 @@ export default function App() {
   const startedAt = useRef(0)
   const startGeneration = useRef(0)
   const countdownDone = useRef(false)
+  const accompanimentRef = useRef<AccompanimentPlayer>(null)
+  const liveModeRef = useRef(liveMode)
+  liveModeRef.current = liveMode
+  const referenceTakeRef = useRef<Take | null>(null)
+  const referenceOffsetRef = useRef(0)
+  referenceTakeRef.current = referenceTake
+  referenceOffsetRef.current = referenceOffset
   const localeRef = useRef(locale)
   const phaseRef = useRef(phase)
   const hasResult = useRef(false)
@@ -110,6 +123,11 @@ export default function App() {
     if (!countdownDone.current || !recorderRef.current) return
     if (phaseRef.current !== "countdown") return
     recorderRef.current.discard()
+    const player = accompanimentRef.current
+    if (player?.active()) {
+      setReferenceOffset(player.currentTime())
+      if (liveModeRef.current) player.play()
+    }
     startedAt.current = performance.now()
     setElapsed(0)
     setCountdown(null)
@@ -139,11 +157,14 @@ export default function App() {
 
   const onStart = async () => {
     stopPlayback()
+    setAccompanimentOpen(false)
+    if (liveModeRef.current) accompanimentRef.current?.arm()
     const generation = startGeneration.current + 1
     startGeneration.current = generation
     countdownDone.current = false
     setErrorKey(null)
     setResult(null)
+    setReportOpen(false)
     requestRef.current += 1
     setCountdown(5)
     setPhase("countdown")
@@ -160,12 +181,14 @@ export default function App() {
       if (startGeneration.current !== generation) return
       setAnalyser(null)
       setCountdown(null)
+      accompanimentRef.current?.pause()
       setPhase(take ? "ready" : "idle")
       setErrorKey(isMicDenied(caught) ? "micDenied" : "micFailed")
     }
   }
 
   const onStop = () => {
+    accompanimentRef.current?.pause()
     if (phase === "countdown") {
       startGeneration.current += 1
       countdownDone.current = false
@@ -236,6 +259,7 @@ export default function App() {
       worker.removeEventListener("error", onError)
       setResult(event.data.result)
       setPhase("report")
+      setReportOpen(true)
     }
     const onError = () => {
       worker.removeEventListener("message", onMessage)
@@ -246,21 +270,52 @@ export default function App() {
     }
     worker.addEventListener("message", onMessage)
     worker.addEventListener("error", onError)
-    worker.postMessage({
+    const reference = referenceTakeRef.current
+    const message: {
+      id: number
+      samples: Float32Array
+      sampleRate: number
+      locale: typeof locale
+      reference?: ReferenceAudio
+    } = {
       id,
       samples: take.samples,
       sampleRate: take.sampleRate,
       locale,
-    })
+    }
+    if (reference) {
+      message.reference = {
+        samples: reference.samples,
+        sampleRate: reference.sampleRate,
+        offsetSeconds: referenceOffsetRef.current,
+      }
+    }
+    worker.postMessage(message)
+  }
+
+  const onReferenceAudio = async (file: File) => {
+    try {
+      const next = await decodeAudioFile(file, false)
+      const player = accompanimentRef.current
+      if (player?.active()) setReferenceOffset(player.currentTime())
+      setReferenceTake(next)
+      setReferenceName(file.name)
+      setErrorKey(null)
+    } catch {
+      setErrorKey("uploadFailed")
+    }
   }
 
   const onUpload = async (file: File) => {
     stopPlayback()
     setErrorKey(null)
     setResult(null)
+    setReportOpen(false)
     requestRef.current += 1
     try {
       const nextTake = await decodeAudioFile(file)
+      const player = accompanimentRef.current
+      if (player?.active()) setReferenceOffset(player.currentTime())
       setTake(nextTake)
       setElapsed(nextTake.samples.length / nextTake.sampleRate)
       setAnalyser(null)
@@ -276,6 +331,15 @@ export default function App() {
   analyzeRef.current = beginAnalysis
 
   useEffect(() => {
+    if (!accompanimentOpen) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAccompanimentOpen(false)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [accompanimentOpen])
+
+  useEffect(() => {
     if (localeRef.current === locale) return
     localeRef.current = locale
     if (!hasResult.current || phaseRef.current === "recording" || phaseRef.current === "countdown") return
@@ -285,7 +349,7 @@ export default function App() {
   return (
     <div className="relative min-h-svh">
       <div className="lab-grid pointer-events-none absolute inset-0" />
-      <main className="relative mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 py-12">
+      <main className="relative mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 pt-12 pb-56">
         <header className="flex items-start justify-between gap-4">
           <div className="space-y-3">
             <p className="font-mono text-[11px] tracking-[0.28em] text-cyan-200/80">
@@ -296,45 +360,98 @@ export default function App() {
               {t("subtitle")}
             </p>
           </div>
-          <Button
-            variant="outline"
-            size="icon"
-            aria-label={t("settings")}
-            onClick={() => setSettingsOpen(true)}
-          >
-            <Settings />
-          </Button>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label={t("accompaniment")}
+              aria-haspopup="dialog"
+              aria-expanded={accompanimentOpen}
+              aria-controls="accompaniment-popup"
+              onClick={() => setAccompanimentOpen((open) => !open)}
+            >
+              <Music2 />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label={t("settings")}
+              onClick={() => setSettingsOpen(true)}
+            >
+              <Settings />
+            </Button>
+          </div>
         </header>
-        <RecorderPanel
-          phase={phase}
-          elapsed={elapsed}
-          playbackSeconds={playbackSeconds}
-          takeSeconds={takeSeconds}
-          error={errorKey ? t(errorKey) : null}
-          analyser={analyser}
-          countdown={countdown}
-          samples={phase === "countdown" ? null : (take?.samples ?? null)}
-          canAnalyze={canAnalyze}
-          canPlay={take != null && take.samples.length > 0 && phase !== "recording" && phase !== "countdown"}
-          playing={playing}
-          playheadRef={playheadRef}
-          onStart={() => {
-            void onStart()
-          }}
-          onStop={onStop}
-          onPlay={onPlay}
-          onAnalyze={onAnalyze}
-          onUpload={(file) => {
-            void onUpload(file)
-          }}
-        />
-        {result ? <ScoreReport result={result} /> : null}
+        <div className="relative h-0">
+          <div
+            id="accompaniment-popup"
+            className={
+              accompanimentOpen
+                ? "absolute top-2 right-0 z-50 w-[min(24rem,calc(100vw-2.5rem))] shadow-[0_24px_80px_rgba(0,0,0,0.45)]"
+                : "pointer-events-none fixed top-0 left-0 -z-10 w-[min(24rem,calc(100vw-2.5rem))] opacity-0"
+            }
+            inert={accompanimentOpen ? undefined : true}
+            aria-hidden={accompanimentOpen ? undefined : true}
+          >
+            <div
+              role={accompanimentOpen ? "dialog" : undefined}
+              aria-modal={accompanimentOpen ? true : undefined}
+              aria-labelledby="accompaniment-title"
+            >
+              <AccompanimentPanel
+                ref={accompanimentRef}
+                audioName={referenceName}
+                offsetSeconds={referenceOffset}
+                onAudio={(file) => {
+                  void onReferenceAudio(file)
+                }}
+                onClearAudio={() => {
+                  setReferenceTake(null)
+                  setReferenceName(null)
+                  setReferenceOffset(0)
+                }}
+                onAlign={setReferenceOffset}
+                onClose={() => setAccompanimentOpen(false)}
+                liveMode={liveMode}
+              />
+            </div>
+          </div>
+        </div>
+        {result ? (
+          <ScoreReport result={result} open={reportOpen} onClose={() => setReportOpen(false)} />
+        ) : null}
         <SettingsDialog
           open={settingsOpen}
           busy={phase === "countdown" || phase === "recording" || phase === "analyzing"}
           onClose={() => setSettingsOpen(false)}
         />
       </main>
+      <RecorderPanel
+        phase={phase}
+        elapsed={elapsed}
+        playbackSeconds={playbackSeconds}
+        takeSeconds={takeSeconds}
+        error={errorKey ? t(errorKey) : null}
+        analyser={analyser}
+        countdown={countdown}
+        samples={phase === "countdown" ? null : (take?.samples ?? null)}
+        canAnalyze={canAnalyze}
+        canPlay={take != null && take.samples.length > 0 && phase !== "recording" && phase !== "countdown"}
+        playing={playing}
+        playheadRef={playheadRef}
+        onStart={() => {
+          void onStart()
+        }}
+        onStop={onStop}
+        onPlay={onPlay}
+        score={phase === "report" && result?.status === "scored" ? result.overall : null}
+        onAnalyze={
+          phase === "report" && result?.status === "scored" ? () => setReportOpen(true) : onAnalyze
+        }
+        onUpload={(file) => {
+          void onUpload(file)
+        }}
+      />
     </div>
   )
 }

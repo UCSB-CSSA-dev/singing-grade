@@ -10,6 +10,13 @@ function sine(frequency: number, seconds: number, sampleRate: number): Float32Ar
   return samples
 }
 
+function concat(left: Float32Array, right: Float32Array): Float32Array {
+  const joined = new Float32Array(left.length + right.length)
+  joined.set(left, 0)
+  joined.set(right, left.length)
+  return joined
+}
+
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b)
   const mid = Math.floor(sorted.length / 2)
@@ -56,10 +63,95 @@ describe("analyzeSinging", () => {
     expect(result.message.toLowerCase()).toContain("not enough singing")
   })
 
+  it("scores pitch against the accompaniment instead of the singer's own key", () => {
+    const sung = sine(466.16, 3, 44100)
+    const matched = analyzeSinging(sung, 44100, "en", {
+      samples: sine(466.16, 3, 44100),
+      sampleRate: 44100,
+      offsetSeconds: 0,
+    })
+    const off = analyzeSinging(sung, 44100, "en", {
+      samples: sine(440, 3, 44100),
+      sampleRate: 44100,
+      offsetSeconds: 0,
+    })
+    expect(matched.status).toBe("scored")
+    expect(off.status).toBe("scored")
+    if (matched.status !== "scored" || off.status !== "scored") return
+    const matchedScore = matched.dimensions.find((dimension) => dimension.id === "intonation")?.score ?? 0
+    const offScore = off.dimensions.find((dimension) => dimension.id === "intonation")?.score ?? 0
+    expect(matchedScore).toBeGreaterThanOrEqual(85)
+    expect(offScore).toBeLessThan(matchedScore)
+    expect(matched.keyLabel).toContain("accompaniment")
+    expect(Math.abs(median(matched.series.intonation.map((point) => point.cents)))).toBeLessThan(20)
+    expect(Math.abs(median(off.series.intonation.map((point) => point.cents)))).toBeGreaterThan(70)
+  })
+
+  it("treats the same note an octave above the accompaniment as in tune", () => {
+    const result = analyzeSinging(sine(880, 3, 44100), 44100, "en", {
+      samples: sine(440, 3, 44100),
+      sampleRate: 44100,
+      offsetSeconds: 0,
+    })
+    expect(result.status).toBe("scored")
+    if (result.status !== "scored") return
+    expect(Math.abs(median(result.series.intonation.map((point) => point.cents)))).toBeLessThan(20)
+    expect(result.series.notes[0]?.name.startsWith("A")).toBe(true)
+  })
+
+  it("lines the take up with a later point in the accompaniment", () => {
+    const result = analyzeSinging(sine(440, 2, 44100), 44100, "en", {
+      samples: concat(sine(330, 1, 44100), sine(440, 2, 44100)),
+      sampleRate: 44100,
+      offsetSeconds: 1,
+    })
+    expect(result.status).toBe("scored")
+    if (result.status !== "scored") return
+    expect(Math.abs(median(result.series.intonation.map((point) => point.cents)))).toBeLessThan(25)
+  })
+
   it("writes the insufficient message in Chinese", () => {
     const result = analyzeSinging(new Float32Array(44100 * 3), 44100, "zh")
     expect(result.status).toBe("insufficient")
     if (result.status !== "insufficient") return
     expect(result.message).toContain("唱得不够")
+  })
+
+  it("keeps the same scores and writes the report in English or Chinese", () => {
+    const tone = sine(440, 3, 44100)
+    const english = analyzeSinging(tone, 44100, "en")
+    const chinese = analyzeSinging(tone, 44100, "zh")
+    expect(english.status).toBe("scored")
+    expect(chinese.status).toBe("scored")
+    if (english.status !== "scored" || chinese.status !== "scored") return
+
+    expect(chinese.overall).toBe(english.overall)
+    expect(chinese.dimensions.map((dimension) => dimension.score)).toEqual(
+      english.dimensions.map((dimension) => dimension.score),
+    )
+    expect(english.dimensions.map((dimension) => dimension.label)).toEqual([
+      "Intonation",
+      "Stability",
+      "Tone",
+      "Dynamics",
+      "Phrasing",
+    ])
+    expect(chinese.dimensions.map((dimension) => dimension.label)).toEqual([
+      "音准",
+      "稳定",
+      "音色",
+      "力度",
+      "乐句",
+    ])
+    expect(english.keyLabel).toMatch(/major|minor/)
+    expect(chinese.keyLabel).toMatch(/大调|小调/)
+    expect(english.dimensions[0]?.detail).toContain("cents")
+    expect(chinese.dimensions[0]?.detail).toContain("音分")
+    expect(english.notes.join(" ")).toContain("Intonation sits close to the key.")
+    expect(english.notes.join(" ")).toContain("Held notes stay steady.")
+    expect(chinese.notes.join("")).toContain("音准贴近调性。")
+    expect(chinese.notes.join("")).toContain("持续音很稳。")
+    expect(chinese.notes.join("")).not.toContain("Intonation")
+    expect(english.notes.join(" ")).not.toContain("音准")
   })
 })

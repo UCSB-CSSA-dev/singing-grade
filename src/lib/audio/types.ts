@@ -65,3 +65,9 @@ export type Take = {
   samples: Float32Array
   sampleRate: number
 }
+
+export type ReferenceAudio = {
+  samples: Float32Array
+  sampleRate: number
+  offsetSeconds: number
+}

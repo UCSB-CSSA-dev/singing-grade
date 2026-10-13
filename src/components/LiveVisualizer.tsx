@@ -7,6 +7,7 @@ type LiveVisualizerProps = {
   playing: boolean
   playheadRef: RefObject<number | null>
   samples: Float32Array | null
+  compact?: boolean
 }
 
 const BAR_WIDTH = 3
@@ -21,6 +22,7 @@ export function LiveVisualizer({
   playing,
   playheadRef,
   samples,
+  compact = false,
 }: LiveVisualizerProps) {
   const { t } = usePreferences()
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -98,10 +100,10 @@ export function LiveVisualizer({
   }, [active, analyser, playing, playheadRef, samples])
 
   return (
-    <div className="space-y-3">
+    <div className={compact ? "space-y-1.5" : "space-y-3"}>
       <canvas
         ref={canvasRef}
-        className="h-40 w-full rounded-xl border border-white/10"
+        className={compact ? "h-12 w-full rounded-lg border border-white/10" : "h-40 w-full rounded-xl border border-white/10"}
         role="img"
         aria-label={active ? t("recordingWave") : playing ? t("playingWave") : t("recordedWave")}
       />

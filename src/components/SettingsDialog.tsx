@@ -12,7 +12,7 @@ type SettingsDialogProps = {
 }
 
 export function SettingsDialog({ open, busy, onClose }: SettingsDialogProps) {
-  const { locale, micGain, setLocale, setMicGain, t } = usePreferences()
+  const { locale, micGain, liveMode, setLocale, setMicGain, setLiveMode, t } = usePreferences()
   const [testing, setTesting] = useState(false)
   const [level, setLevel] = useState(0)
   const [error, setError] = useState<string | null>(null)
@@ -162,7 +162,26 @@ export function SettingsDialog({ open, busy, onClose }: SettingsDialogProps) {
           </Button>
         </div>
 
-        <div className="mt-5 space-y-2">
+        <div className="mt-5 flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <p className="text-sm font-medium">{t("liveMode")}</p>
+            <p className="text-xs leading-5 text-muted-foreground">{t("liveModeHint")}</p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={liveMode}
+            aria-label={t("liveMode")}
+            className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full border transition-colors ${liveMode ? "border-cyan-300 bg-cyan-300" : "border-white/25 bg-white/10"}`}
+            onClick={() => setLiveMode(!liveMode)}
+          >
+            <span
+              className={`absolute top-0.5 left-0.5 size-5 rounded-full bg-white shadow-sm transition-transform ${liveMode ? "translate-x-5" : "translate-x-0"}`}
+            />
+          </button>
+        </div>
+
+        <div className="mt-6 space-y-2">
           <p className="text-sm font-medium">{t("language")}</p>
           <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label={t("language")}>
             <Button
