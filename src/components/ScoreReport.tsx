@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { X } from "lucide-react"
+import { CoachSummary } from "@/components/CoachSummary"
 import { NoteLevelChart } from "@/components/NoteLevelChart"
 import { PitchScrollChart } from "@/components/PitchScrollChart"
 import { ScoreDetail } from "@/components/ScoreDetail"
@@ -91,6 +92,7 @@ export function ScoreReport({ result, open, onClose }: ScoreReportProps) {
             })}
           </div>
         </div>
+        <CoachSummary result={result} />
         <div className="space-y-3">
           <h3 className="text-sm font-medium">{t("coachNotes")}</h3>
           <ul className="space-y-2 border-l border-cyan-300/40 pl-4">

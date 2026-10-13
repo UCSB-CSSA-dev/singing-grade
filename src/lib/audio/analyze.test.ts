@@ -116,4 +116,42 @@ describe("analyzeSinging", () => {
     if (result.status !== "insufficient") return
     expect(result.message).toContain("唱得不够")
   })
+
+  it("keeps the same scores and writes the report in English or Chinese", () => {
+    const tone = sine(440, 3, 44100)
+    const english = analyzeSinging(tone, 44100, "en")
+    const chinese = analyzeSinging(tone, 44100, "zh")
+    expect(english.status).toBe("scored")
+    expect(chinese.status).toBe("scored")
+    if (english.status !== "scored" || chinese.status !== "scored") return
+
+    expect(chinese.overall).toBe(english.overall)
+    expect(chinese.dimensions.map((dimension) => dimension.score)).toEqual(
+      english.dimensions.map((dimension) => dimension.score),
+    )
+    expect(english.dimensions.map((dimension) => dimension.label)).toEqual([
+      "Intonation",
+      "Stability",
+      "Tone",
+      "Dynamics",
+      "Phrasing",
+    ])
+    expect(chinese.dimensions.map((dimension) => dimension.label)).toEqual([
+      "音准",
+      "稳定",
+      "音色",
+      "力度",
+      "乐句",
+    ])
+    expect(english.keyLabel).toMatch(/major|minor/)
+    expect(chinese.keyLabel).toMatch(/大调|小调/)
+    expect(english.dimensions[0]?.detail).toContain("cents")
+    expect(chinese.dimensions[0]?.detail).toContain("音分")
+    expect(english.notes.join(" ")).toContain("Intonation sits close to the key.")
+    expect(english.notes.join(" ")).toContain("Held notes stay steady.")
+    expect(chinese.notes.join("")).toContain("音准贴近调性。")
+    expect(chinese.notes.join("")).toContain("持续音很稳。")
+    expect(chinese.notes.join("")).not.toContain("Intonation")
+    expect(english.notes.join(" ")).not.toContain("音准")
+  })
 })
